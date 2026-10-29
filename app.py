@@ -1,10 +1,10 @@
-
 import streamlit as st
 import torch
-from pathlib import Path
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
-# ---------------- PAGE CONFIG ----------------
+# =====================================================
+# PAGE CONFIGURATION
+# =====================================================
 st.set_page_config(
     page_title="SamSum AI | Text Summarizer",
     page_icon="📝",
@@ -12,16 +12,12 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-MODEL_PATH = Path(__file__).parent / "samsum_t5_final"
+# Your fine-tuned model on Hugging Face Hub
+MODEL_ID = "iankityadav03/samsum-t5-summarizer"
 
-# Handle an extra nested folder after ZIP extraction
-if not (MODEL_PATH / "config.json").exists():
-    configs = list(MODEL_PATH.rglob("config.json"))
-
-    if configs:
-        MODEL_PATH = configs[0].parent
-
-# ---------------- CUSTOM CSS ----------------
+# =====================================================
+# CUSTOM CSS
+# =====================================================
 st.markdown("""
 <style>
 .block-container {
@@ -44,7 +40,7 @@ st.markdown("""
     margin-top: 0.6rem;
     font-size: 1.05rem;
 }
-.stButton button {
+.stButton button, .stDownloadButton button {
     border-radius: 10px;
     min-height: 2.8rem;
     font-weight: 600;
@@ -52,44 +48,39 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- LOAD MODEL ----------------
+# =====================================================
+# LOAD MODEL FROM HUGGING FACE
+# =====================================================
 @st.cache_resource(show_spinner=False)
-def load_model(model_path):
-    if not (model_path / "config.json").exists():
-        raise FileNotFoundError(
-            f"Model configuration not found in {model_path}. "
-            "Check that the extracted model folder contains config.json."
-        )
+def load_model():
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        str(model_path),
-        local_files_only=True
-    )
-
-    model = AutoModelForSeq2SeqLM.from_pretrained(
-        str(model_path),
-        local_files_only=True
-    )
+    model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_ID)
 
     device = torch.device(
         "cuda" if torch.cuda.is_available() else "cpu"
     )
+
     model.to(device)
     model.eval()
 
     return tokenizer, model, device
 
 
-# ---------------- HEADER ----------------
+# =====================================================
+# HEADER
+# =====================================================
 st.markdown("""
 <div class="hero">
     <h1>📝 SamSum AI Summarizer</h1>
-    <p>Turn lengthy conversations into clear, concise summaries
-    using your fine-tuned Transformer model.</p>
+    <p>Transform lengthy conversations into clear,
+    concise summaries using your fine-tuned Transformer model.</p>
 </div>
 """, unsafe_allow_html=True)
 
-# ---------------- SIDEBAR ----------------
+# =====================================================
+# SIDEBAR SETTINGS
+# =====================================================
 with st.sidebar:
     st.title("⚙️ Settings")
 
@@ -104,19 +95,20 @@ with st.sidebar:
         min_value=1,
         max_value=4,
         value=4,
-        help="More beams can improve output but take longer."
+        help="Higher beam values can improve generation quality but may take longer."
     )
 
     st.divider()
-    st.subheader("About")
+    st.subheader("About this project")
     st.write(
-        "This app uses a fine-tuned T5 encoder-decoder model "
-        "trained for dialogue summarization on SAMSum."
+        "A dialogue summarization application powered by a "
+        "fine-tuned T5 model trained on the SAMSum dataset."
     )
+    st.caption("Model hosted on Hugging Face Hub.")
 
-    st.caption("Model inference runs on the application server.")
-
-# ---------------- INPUT ----------------
+# =====================================================
+# INPUT AND OUTPUT LAYOUT
+# =====================================================
 left, right = st.columns(2, gap="large")
 
 example_text = (
@@ -128,7 +120,7 @@ example_text = (
 
 with left:
     st.subheader("💬 Conversation")
-    st.caption("Paste the conversation you want to summarize.")
+    st.caption("Paste a conversation to generate its summary.")
 
     if st.button("Load example conversation"):
         st.session_state["dialogue"] = example_text
@@ -155,31 +147,37 @@ with left:
         st.session_state.pop("summary_result", None)
         st.rerun()
 
-# ---------------- GENERATION ----------------
+# =====================================================
+# SUMMARY GENERATION
+# =====================================================
 if generate:
     if not dialogue.strip():
         st.warning("Please enter a conversation first.")
+
     elif word_count < 3:
         st.warning("Please enter a longer conversation.")
+
     else:
         try:
-            with st.spinner("Loading model and generating summary..."):
-                tokenizer, model, device = load_model(MODEL_PATH)
+            with st.spinner(
+                "Loading your AI model and generating summary..."
+            ):
+                tokenizer, model, device = load_model()
 
-                max_input_tokens = 512
                 input_text = "summarize: " + dialogue.strip()
 
                 inputs = tokenizer(
                     input_text,
                     return_tensors="pt",
-                    max_length=max_input_tokens,
+                    max_length=512,
                     truncation=True
                 ).to(device)
 
+                # Generation settings
                 lengths = {
-                    "Short": (30, 60),
-                    "Balanced": (50, 100),
-                    "Detailed": (80, 140)
+                    "Short": (10, 40),
+                    "Balanced": (20, 80),
+                    "Detailed": (30, 120)
                 }
 
                 min_tokens, max_tokens = lengths[summary_length]
@@ -190,8 +188,7 @@ if generate:
                         max_new_tokens=max_tokens,
                         min_new_tokens=min_tokens,
                         num_beams=num_beams,
-                        do_sample=False,
-                        early_stopping=True
+                        do_sample=False
                     )
 
                 summary = tokenizer.decode(
@@ -199,15 +196,25 @@ if generate:
                     skip_special_tokens=True
                 ).strip()
 
-                st.session_state["summary_result"] = summary
+                if not summary:
+                    st.warning(
+                        "The model returned an empty summary. "
+                        "Try another conversation."
+                    )
+                else:
+                    st.session_state["summary_result"] = summary
 
         except Exception as e:
-            st.error(f"Could not generate summary: {e}")
+            st.error(
+                f"Could not generate summary: {e}"
+            )
 
-# ---------------- OUTPUT ----------------
+# =====================================================
+# DISPLAY GENERATED SUMMARY
+# =====================================================
 with right:
     st.subheader("✨ Generated Summary")
-    st.caption("Your AI-generated result will appear here.")
+    st.caption("Your AI-generated summary will appear here.")
 
     summary = st.session_state.get("summary_result", "")
 
@@ -226,12 +233,15 @@ with right:
         col1.metric("Original words", original_words)
         col2.metric("Summary words", summary_words)
 
-        if original_words:
+        if original_words > 0:
             reduction = max(
                 0,
                 (1 - summary_words / original_words) * 100
             )
-            st.metric("Word reduction", f"{reduction:.1f}%")
+            st.metric(
+                "Word reduction",
+                f"{reduction:.1f}%"
+            )
 
         st.download_button(
             "⬇️ Download summary (.txt)",
@@ -240,13 +250,17 @@ with right:
             mime="text/plain",
             use_container_width=True
         )
+
     else:
         st.info(
             "Your summary will appear here after you click "
             "'Generate Summary'."
         )
 
+# =====================================================
+# FOOTER
+# =====================================================
 st.divider()
 st.caption(
-    "Built with Streamlit, PyTorch, and Hugging Face Transformers."
+    "Built with Streamlit, PyTorch, Hugging Face Transformers, and T5."
 )
