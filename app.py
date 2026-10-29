@@ -13,7 +13,7 @@ st.set_page_config(
 )
 
 # Your fine-tuned model on Hugging Face Hub
-MODEL_ID = "kashanalyas/t5-small-samsum"
+MODEL_ID = "iankityadav03/samsum-t5-summarizer"
 
 # =====================================================
 # CUSTOM CSS
